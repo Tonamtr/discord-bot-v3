@@ -14,7 +14,7 @@ const {
 } = require('discord.js');
 const express = require('express');
 
-// --- 1. ระบบป้องกันบอทหลับ (Express Server) ---
+// --- 1. ระบบป้องกันบอทหลับ ---
 const app = express();
 app.get('/', (req, res) => res.send('System is Live!'));
 app.listen(3000, () => {
@@ -36,7 +36,6 @@ const GUILD_ID = process.env.GUILD_ID;
 const ROLE_ID = process.env.ROLE_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 
-// ข้อมูลสำหรับลงทะเบียนคำสั่ง Slash Command
 const commands = [
     {
         name: 'แนะนำตัว',
@@ -48,7 +47,6 @@ const commands = [
 client.once('ready', async () => {
     console.log(`✅ บอท ${client.user.tag} ออนไลน์แล้ว!`);
     
-    // บังคับลงทะเบียน Slash Commands ใหม่ทุกครั้งที่รัน
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
         console.log('🔄 กำลังลงทะเบียน Slash Commands...');
@@ -62,7 +60,7 @@ client.once('ready', async () => {
     }
 });
 
-// ฟังก์ชันสร้างหน้าต่างหลัก (Embed + ปุ่ม)
+// ฟังก์ชันสร้างเมนู
 function getIntroMenu() {
     const embed = new EmbedBuilder()
         .setTitle('📝 แบบฟอร์มแนะนำตัว')
@@ -73,4 +71,76 @@ function getIntroMenu() {
         new ButtonBuilder()
             .setCustomId('btn_intro')
             .setLabel('เริ่มแนะนำตัว')
-            .setButtonStyle(ButtonStyle.Primary
+            .setButtonStyle(ButtonStyle.Primary)
+    );
+    return { embeds: [embed], components: [row] };
+}
+
+// --- 4. การจัดการ Interaction ---
+client.on('interactionCreate', async (interaction) => {
+    
+    if (interaction.isChatInputCommand() && interaction.commandName === 'แนะนำตัว') {
+        return interaction.reply(getIntroMenu());
+    }
+
+    if (interaction.isButton() && interaction.customId === 'btn_intro') {
+        const modal = new ModalBuilder()
+            .setCustomId('modal_intro')
+            .setTitle('ข้อมูลแนะนำตัว');
+
+        const nameInput = new TextInputBuilder()
+            .setCustomId('name_input').setLabel('ชื่อเล่น').setStyle(TextInputStyle.Short).setRequired(true);
+        const ageInput = new TextInputBuilder()
+            .setCustomId('age_input').setLabel('อายุ').setStyle(TextInputStyle.Short).setRequired(true);
+        const sourceInput = new TextInputBuilder()
+            .setCustomId('source_input').setLabel('รู้จักเราได้ยังไง').setStyle(TextInputStyle.Short).setRequired(true);
+
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(nameInput),
+            new ActionRowBuilder().addComponents(ageInput),
+            new ActionRowBuilder().addComponents(sourceInput)
+        );
+        return interaction.showModal(modal);
+    }
+
+    if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'modal_intro') {
+        await interaction.deferReply({ ephemeral: true });
+
+        const name = interaction.fields.getTextInputValue('name_input');
+        const age = interaction.fields.getTextInputValue('age_input');
+        const source = interaction.fields.getTextInputValue('source_input');
+
+        try {
+            const role = interaction.guild.roles.cache.get(ROLE_ID);
+            if (role) await interaction.member.roles.add(role);
+
+            const logChannel = client.channels.cache.get(LOG_CHANNEL_ID);
+            if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                    .setTitle('📥 สมาชิกใหม่แนะนำตัว')
+                    .addFields(
+                        { name: '👤 ชื่อ', value: name, inline: true },
+                        { name: '🎂 อายุ', value: age, inline: true },
+                        { name: '🔗 แหล่งที่มา', value: source, inline: true },
+                        { name: '🆔 บัญชี', value: `<@${interaction.user.id}>`, inline: false }
+                    )
+                    .setColor('#5865F2').setTimestamp();
+                await logChannel.send({ embeds: [logEmbed] });
+            }
+
+            await interaction.editReply({ content: `✅ ขอบคุณครับคุณ **${name}** แนะนำตัวเสร็จเรียบร้อย!` });
+        } catch (err) {
+            console.error('❌ Error:', err);
+            await interaction.editReply({ content: '❌ มีข้อผิดพลาด (ตรวจสอบสิทธิ์ยศบอทด้วยครับ)' });
+        }
+    }
+});
+
+// รองรับการพิมพ์ธรรมดา
+client.on('messageCreate', async (message) => {
+    if (message.content === '/แนะนำตัว' && !message.author.bot) {
+        await message.channel.send(getIntroMenu());
+    }
+});
+
+client.login(TOKEN);
