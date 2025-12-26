@@ -1,144 +1,76 @@
-const express = require("express");
-const {
-  Client,
-  GatewayIntentBits,
-  SlashCommandBuilder,
-  Routes,
-  EmbedBuilder,
-} = require("discord.js");
-const { REST } = require("@discordjs/rest");
+const { 
+    Client, 
+    GatewayIntentBits, 
+    EmbedBuilder, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    ModalBuilder, 
+    TextInputBuilder, 
+    TextInputStyle, 
+    InteractionType,
+    REST,
+    Routes
+} = require('discord.js');
+const express = require('express');
 
-// --- 1. ระบบรักษาการออนไลน์ (Uptime) ---
+// --- 1. ระบบป้องกันบอทหลับ (Express Server) ---
 const app = express();
-app.get("/", (req, res) => res.send("บอทแนะนำตัวออนไลน์แล้ว!"));
-app.listen(3000);
+app.get('/', (req, res) => res.send('System is Live!'));
+app.listen(3000, () => {
+    console.log('✅ Web Server พร้อมใช้งานที่พอร์ต 3000');
+});
 
+// --- 2. ตั้งค่าบอท Discord ---
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
 });
 
-// --- 2. การสร้างคำสั่ง Slash Command ---
+const TOKEN = process.env.TOKEN;
+const GUILD_ID = process.env.GUILD_ID;
+const ROLE_ID = process.env.ROLE_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+
+// ข้อมูลสำหรับลงทะเบียนคำสั่ง Slash Command
 const commands = [
-  new SlashCommandBuilder()
-    .setName("แนะนำตัว")
-    .setDescription("กรอกข้อมูลแนะนำตัวเพื่อรับยศและเข้าสู่เซิร์ฟเวอร์")
-    .addStringOption((opt) =>
-      opt.setName("ชื่อ").setDescription("ชื่อเล่นของคุณ").setRequired(true),
-    )
-    .addIntegerOption((opt) =>
-      opt
-        .setName("อายุ")
-        .setDescription("อายุของคุณ (ตัวเลข)")
-        .setRequired(true),
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName("มาจากใคร")
-        .setDescription("คนที่แนะนำคุณมา หรือรู้จักเราจากไหน")
-        .setRequired(true),
-    ),
-].map((command) => command.toJSON());
-
-// --- 3. ลงทะเบียนคำสั่งเมื่อบอทพร้อม ---
-client.on("ready", async () => {
-  const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
-  try {
-    await rest.put(
-      Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
-      { body: commands },
-    );
-    console.log(
-      `✅ บอท ${client.user.tag} พร้อมใช้งานและแยกห้อง Log เรียบร้อย!`,
-    );
-  } catch (error) {
-    console.error("เกิดข้อผิดพลาดในการลงทะเบียนคำสั่ง:", error);
-  }
-});
-
-// --- 4. ระบบรับข้อมูล/ให้ยศ/แยกห้องส่งข้อมูล ---
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
-  if (interaction.commandName === "แนะนำตัว") {
-    const name = interaction.options.getString("ชื่อ");
-    const age = interaction.options.getInteger("อายุ");
-    const ref = interaction.options.getString("มาจากใคร");
-
-    try {
-      // --- ส่วนที่ 1: ให้ยศสมาชิก ---
-      const role = interaction.guild.roles.cache.get(process.env.ROLE_ID);
-      if (role) {
-        await interaction.member.roles.add(role);
-      }
-
-      // --- ส่วนที่ 2: ส่งข้อมูลสรุปไปที่ "ห้องยืนยันสำเร็จ" (LOG_CHANNEL_ID) ---
-      const logChannel = interaction.guild.channels.cache.get(
-        process.env.LOG_CHANNEL_ID,
-      );
-      const successEmbed = new EmbedBuilder()
-        .setTitle("🎉 มีสมาชิกใหม่แนะนำตัวสำเร็จ!")
-        .setColor(0x2ecc71) // สีเขียว
-        .setThumbnail(interaction.user.displayAvatarURL())
-        .addFields(
-          {
-            name: "👤 สมาชิก",
-            value: `${interaction.user} (${interaction.user.tag})`,
-            inline: false,
-          },
-          { name: "📝 ชื่อเล่น", value: name, inline: true },
-          { name: "🎂 อายุ", value: `${age} ปี`, inline: true },
-          { name: "🔗 แนะนำโดย", value: ref, inline: false },
-        )
-        .setTimestamp()
-        .setFooter({ text: `ID: ${interaction.user.id}` });
-
-      if (logChannel) {
-        await logChannel.send({ embeds: [successEmbed] });
-      }
-
-      // --- ส่วนที่ 3: ตอบกลับผู้ใช้ (เห็นเฉพาะเจ้าตัว) ---
-      await interaction.reply({
-        content: `✅ บันทึกข้อมูลเรียบร้อยและคุณได้รับยศสมาชิกแล้ว! ยินดีต้อนรับครับคุณ **${name}**`,
-        ephemeral: true,
-      });
-
-      // --- ส่วนที่ 4: ส่งวิธีใช้งานกลับมาที่ "ห้องแนะนำตัว" (ให้คนต่อไปเห็น) ---
-      const helpEmbed = new EmbedBuilder()
-        .setTitle("📢 วิธีการแนะนำตัวเพื่อรับยศสมาชิก")
-        .setDescription("หากคุณยังไม่ได้รับยศ โปรดทำตามขั้นตอนด้านล่างนี้:")
-        .setColor(0x3498db) // สีฟ้า
-        .addFields(
-          {
-            name: "1. พิมพ์คำสั่ง",
-            value: "พิมพ์ `/แนะนำตัว` ในช่องแชทนี้",
-            inline: false,
-          },
-          {
-            name: "2. กรอกข้อมูล",
-            value: "ใส่ชื่อ, อายุ และคนที่แนะนำมาให้ครบถ้วน",
-            inline: false,
-          },
-          {
-            name: "3. กดส่ง",
-            value:
-              "เมื่อส่งแล้ว ระบบจะให้ยศสมาชิกและส่งข้อมูลคุณไปที่ห้อง Log ทันที!",
-            inline: false,
-          },
-        )
-        .setFooter({ text: "ระบบแนะนำตัวอัตโนมัติ 24 ชม." });
-
-      await interaction.channel.send({ embeds: [helpEmbed] });
-    } catch (err) {
-      console.error("เกิดข้อผิดพลาด:", err);
-      if (!interaction.replied) {
-        await interaction.reply({
-          content:
-            "❌ เกิดข้อผิดพลาด: บอทอาจจะไม่มีสิทธิ์ให้ยศ หรือตั้งค่า ID ใน Secrets ผิด",
-          ephemeral: true,
-        });
-      }
+    {
+        name: 'แนะนำตัว',
+        description: 'เริ่มต้นการแนะนำตัวเพื่อรับยศในเซิร์ฟเวอร์'
     }
-  }
+];
+
+// --- 3. เมื่อบอทพร้อมใช้งาน ---
+client.once('ready', async () => {
+    console.log(`✅ บอท ${client.user.tag} ออนไลน์แล้ว!`);
+    
+    // บังคับลงทะเบียน Slash Commands ใหม่ทุกครั้งที่รัน
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    try {
+        console.log('🔄 กำลังลงทะเบียน Slash Commands...');
+        await rest.put(
+            Routes.applicationGuildCommands(client.user.id, GUILD_ID),
+            { body: commands }
+        );
+        console.log('✅ ลงทะเบียน Slash Commands สำเร็จ!');
+    } catch (error) {
+        console.error('❌ ไม่สามารถลงทะเบียนคำสั่งได้:', error);
+    }
 });
 
-client.login(process.env.TOKEN);
+// ฟังก์ชันสร้างหน้าต่างหลัก (Embed + ปุ่ม)
+function getIntroMenu() {
+    const embed = new EmbedBuilder()
+        .setTitle('📝 แบบฟอร์มแนะนำตัว')
+        .setDescription('ยินดีต้อนรับ! กรุณากดปุ่มด้านล่างเพื่อเริ่มแนะนำตัวครับ')
+        .setColor('#00ff00');
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('btn_intro')
+            .setLabel('เริ่มแนะนำตัว')
+            .setButtonStyle(ButtonStyle.Primary
