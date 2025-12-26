@@ -1,144 +1,128 @@
-const express = require("express");
-const {
-  Client,
-  GatewayIntentBits,
-  SlashCommandBuilder,
-  Routes,
-  EmbedBuilder,
-} = require("discord.js");
-const { REST } = require("@discordjs/rest");
+const { 
+    Client, 
+    GatewayIntentBits, 
+    EmbedBuilder, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    ModalBuilder, 
+    TextInputBuilder, 
+    TextInputStyle, 
+    InteractionType 
+} = require('discord.js');
+const express = require('express');
 
-// --- 1. ระบบรักษาการออนไลน์ (Uptime) ---
+// --- ระบบป้องกันบอทหลับ (Express Server) ---
 const app = express();
-app.get("/", (req, res) => res.send("บอทแนะนำตัวออนไลน์แล้ว!"));
-app.listen(3000);
+app.get('/', (req, res) => res.send('บอทกำลังทำงานอยู่ (System is Live)!'));
+app.listen(3000, () => {
+    console.log('✅ Web Server พร้อมใช้งานที่พอร์ต 3000');
+});
 
+// --- ตั้งค่าบอท Discord ---
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
 });
 
-// --- 2. การสร้างคำสั่ง Slash Command ---
-const commands = [
-  new SlashCommandBuilder()
-    .setName("แนะนำตัว")
-    .setDescription("กรอกข้อมูลแนะนำตัวเพื่อรับยศและเข้าสู่เซิร์ฟเวอร์")
-    .addStringOption((opt) =>
-      opt.setName("ชื่อ").setDescription("ชื่อเล่นของคุณ").setRequired(true),
-    )
-    .addIntegerOption((opt) =>
-      opt
-        .setName("อายุ")
-        .setDescription("อายุของคุณ (ตัวเลข)")
-        .setRequired(true),
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName("มาจากใคร")
-        .setDescription("คนที่แนะนำคุณมา หรือรู้จักเราจากไหน")
-        .setRequired(true),
-    ),
-].map((command) => command.toJSON());
+// ดึงค่าจาก Environment Variables ใน Render
+const TOKEN = process.env.TOKEN;
+const GUILD_ID = process.env.GUILD_ID;
+const ROLE_ID = process.env.ROLE_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 
-// --- 3. ลงทะเบียนคำสั่งเมื่อบอทพร้อม ---
-client.on("ready", async () => {
-  const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
-  try {
-    await rest.put(
-      Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
-      { body: commands },
-    );
-    console.log(
-      `✅ บอท ${client.user.tag} พร้อมใช้งานและแยกห้อง Log เรียบร้อย!`,
-    );
-  } catch (error) {
-    console.error("เกิดข้อผิดพลาดในการลงทะเบียนคำสั่ง:", error);
-  }
+client.once('ready', () => {
+    console.log(`✅ บอท ${client.user.tag} ออนไลน์และพร้อมใช้งานแล้ว!`);
 });
 
-// --- 4. ระบบรับข้อมูล/ให้ยศ/แยกห้องส่งข้อมูล ---
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+// --- คำสั่ง /แนะนำตัว ---
+client.on('messageCreate', async (message) => {
+    if (message.content === '/แนะนำตัว') {
+        const embed = new EmbedBuilder()
+            .setTitle('📝 ระบบแนะนำตัวเข้าเซิร์ฟเวอร์')
+            .setDescription('กรุณากดปุ่มด้านล่างเพื่อกรอกข้อมูลแนะนำตัวและรับยศครับ')
+            .setColor('#5865F2');
 
-  if (interaction.commandName === "แนะนำตัว") {
-    const name = interaction.options.getString("ชื่อ");
-    const age = interaction.options.getInteger("อายุ");
-    const ref = interaction.options.getString("มาจากใคร");
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('register_btn')
+                .setLabel('เริ่มแนะนำตัว')
+                .setStyle(ButtonStyle.Primary)
+        );
 
-    try {
-      // --- ส่วนที่ 1: ให้ยศสมาชิก ---
-      const role = interaction.guild.roles.cache.get(process.env.ROLE_ID);
-      if (role) {
-        await interaction.member.roles.add(role);
-      }
-
-      // --- ส่วนที่ 2: ส่งข้อมูลสรุปไปที่ "ห้องยืนยันสำเร็จ" (LOG_CHANNEL_ID) ---
-      const logChannel = interaction.guild.channels.cache.get(
-        process.env.LOG_CHANNEL_ID,
-      );
-      const successEmbed = new EmbedBuilder()
-        .setTitle("🎉 มีสมาชิกใหม่แนะนำตัวสำเร็จ!")
-        .setColor(0x2ecc71) // สีเขียว
-        .setThumbnail(interaction.user.displayAvatarURL())
-        .addFields(
-          {
-            name: "👤 สมาชิก",
-            value: `${interaction.user} (${interaction.user.tag})`,
-            inline: false,
-          },
-          { name: "📝 ชื่อเล่น", value: name, inline: true },
-          { name: "🎂 อายุ", value: `${age} ปี`, inline: true },
-          { name: "🔗 แนะนำโดย", value: ref, inline: false },
-        )
-        .setTimestamp()
-        .setFooter({ text: `ID: ${interaction.user.id}` });
-
-      if (logChannel) {
-        await logChannel.send({ embeds: [successEmbed] });
-      }
-
-      // --- ส่วนที่ 3: ตอบกลับผู้ใช้ (เห็นเฉพาะเจ้าตัว) ---
-      await interaction.reply({
-        content: `✅ บันทึกข้อมูลเรียบร้อยและคุณได้รับยศสมาชิกแล้ว! ยินดีต้อนรับครับคุณ **${name}**`,
-        ephemeral: true,
-      });
-
-      // --- ส่วนที่ 4: ส่งวิธีใช้งานกลับมาที่ "ห้องแนะนำตัว" (ให้คนต่อไปเห็น) ---
-      const helpEmbed = new EmbedBuilder()
-        .setTitle("📢 วิธีการแนะนำตัวเพื่อรับยศสมาชิก")
-        .setDescription("หากคุณยังไม่ได้รับยศ โปรดทำตามขั้นตอนด้านล่างนี้:")
-        .setColor(0x3498db) // สีฟ้า
-        .addFields(
-          {
-            name: "1. พิมพ์คำสั่ง",
-            value: "พิมพ์ `/แนะนำตัว` ในช่องแชทนี้",
-            inline: false,
-          },
-          {
-            name: "2. กรอกข้อมูล",
-            value: "ใส่ชื่อ, อายุ และคนที่แนะนำมาให้ครบถ้วน",
-            inline: false,
-          },
-          {
-            name: "3. กดส่ง",
-            value:
-              "เมื่อส่งแล้ว ระบบจะให้ยศสมาชิกและส่งข้อมูลคุณไปที่ห้อง Log ทันที!",
-            inline: false,
-          },
-        )
-        .setFooter({ text: "ระบบแนะนำตัวอัตโนมัติ 24 ชม." });
-
-      await interaction.channel.send({ embeds: [helpEmbed] });
-    } catch (err) {
-      console.error("เกิดข้อผิดพลาด:", err);
-      if (!interaction.replied) {
-        await interaction.reply({
-          content:
-            "❌ เกิดข้อผิดพลาด: บอทอาจจะไม่มีสิทธิ์ให้ยศ หรือตั้งค่า ID ใน Secrets ผิด",
-          ephemeral: true,
-        });
-      }
+        await message.channel.send({ embeds: [embed], components: [row] });
     }
-  }
 });
 
-client.login(process.env.TOKEN);
+// --- ระบบ Modal (หน้าต่างกรอกข้อมูล) ---
+client.on('interactionCreate', async (interaction) => {
+    if (interaction.isButton() && interaction.customId === 'register_btn') {
+        const modal = new ModalBuilder()
+            .setCustomId('register_modal')
+            .setTitle('ข้อมูลแนะนำตัว');
+
+        const nameInput = new TextInputBuilder()
+            .setCustomId('name')
+            .setLabel('ชื่อเล่น')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+        const ageInput = new TextInputBuilder()
+            .setCustomId('age')
+            .setLabel('อายุ')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(nameInput),
+            new ActionRowBuilder().addComponents(ageInput)
+        );
+
+        await interaction.showModal(modal);
+    }
+
+    if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'register_modal') {
+        const name = interaction.fields.getTextInputValue('name');
+        const age = interaction.fields.getTextInputValue('age');
+        const member = interaction.member;
+
+        try {
+            // 1. ให้ยศสมาชิก
+            const role = interaction.guild.roles.cache.get(ROLE_ID);
+            if (role) await member.roles.add(role);
+
+            // 2. ส่ง Log ไปยังห้องที่กำหนด
+            const logChannel = client.channels.cache.get(LOG_CHANNEL_ID);
+            if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                    .setTitle('📥 มีสมาชิกใหม่แนะนำตัว')
+                    .addFields(
+                        { name: '👤 ชื่อเล่น', value: name, inline: true },
+                        { name: '🎂 อายุ', value: age, inline: true },
+                        { name: '🆔 บัญชี', value: `<@${member.id}>`, inline: false }
+                    )
+                    .setColor('#43B581')
+                    .setTimestamp();
+                await logChannel.send({ embeds: [logEmbed] });
+            }
+
+            await interaction.reply({ content: `✅ ขอบคุณครับคุณ ${name} ยินดีต้อนรับสู่เซิร์ฟเวอร์!`, ephemeral: true });
+
+        } catch (error) {
+            console.error('❌ เกิดข้อผิดพลาด:', error);
+            await interaction.reply({ content: '❌ เกิดข้อผิดพลาดในการรับยศ กรุณาติดต่อแอดมิน', ephemeral: true });
+        }
+    }
+});
+
+// --- ระบบ Login พร้อมตรวจสอบ Error ---
+client.login(TOKEN).catch(err => {
+    console.error('❌ ไม่สามารถ Login ได้:', err.message);
+    if (err.message.includes('privileged intents')) {
+        console.error('👉 วิธีแก้: อย่าลืมเปิด Privileged Gateway Intents ในหน้า Discord Developer Portal ให้ครบครับ!');
+    }
+});
